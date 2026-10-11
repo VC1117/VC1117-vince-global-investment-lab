@@ -40,6 +40,8 @@ jobs:
           run-id: ${{ inputs.resume_run_id }}
           github-token: ${{ github.token }}
           path: research
+      - name: Offline resume regression test
+        run: python scripts/test_fcn_resume.py
       - name: Freeze provisional universe
         if: inputs.resume_run_id == ''
         run: python scripts/fcn_snapshot_batch_pipeline.py snapshot
