@@ -1,0 +1,76 @@
+name: FCN frozen-snapshot automated pilot (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Freeze provisional listing candidates
+        run: python scripts/fcn_snapshot_batch_pipeline.py snapshot
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fcn-snapshot
+          path: research/snapshot.json
+          retention-days: 7
+  batches:
+    needs: snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        start: [0, 20, 40, 60]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fcn-snapshot
+          path: research
+      - name: Install unofficial research-only interface
+        run: python -m pip install 'yfinance>=0.2.65,<2'
+      - name: Screen one 20-symbol batch
+        run: python scripts/fcn_snapshot_batch_pipeline.py screen --start ${{ matrix.start }} --size 20
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fcn-batch-${{ matrix.start }}
+          path: research/results/batch_*.json
+          if-no-files-found: warn
+          retention-days: 7
+  summary:
+    needs: [snapshot, batches]
+    if: always() && needs.snapshot.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fcn-snapshot
+          path: research
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fcn-batch-*
+          path: research/results
+          merge-multiple: true
+      - name: Verify snapshot and summarize non-overlapping batches
+        run: python scripts/fcn_snapshot_batch_pipeline.py summarize
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fcn-automated-pilot-summary
+          path: research/results/summary.json
+          if-no-files-found: warn
+          retention-days: 7
