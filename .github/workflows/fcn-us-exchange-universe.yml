@@ -1,0 +1,16 @@
+name: FCN US exchange universe discovery (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate exchange symbol directories (research only)
+        run: python scripts/test_fcn_us_exchange_universe.py
