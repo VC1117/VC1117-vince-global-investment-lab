@@ -22,7 +22,7 @@ def main():
     with tempfile.TemporaryDirectory() as td:
         d=Path(td);snap=d/"snapshot.json";manifest=d/"manifest.json";out=d/"results"
         symbols=["AAA","BBB"]
-        digest=hashlib.sha256(("\\n".join(symbols)+"\\n").encode()).hexdigest()
+        digest=hashlib.sha256(("\n".join(symbols)+"\n").encode()).hexdigest()
         snap.write_text(json.dumps({"snapshot_id":digest,"symbols":symbols}))
         plan(snap,manifest,2)
         api=API()
