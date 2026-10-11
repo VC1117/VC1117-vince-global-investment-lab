@@ -40,9 +40,8 @@ jobs:
           manifest=Path("research/coverage-plan.json")
           data=json.loads(manifest.read_text())
           if os.environ["SCOPE"]=="pilot":
-              data["shards"]=data["shards"][:2]
-              data["pilot_only"]=True
-              manifest.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n")
+              # Preserve all shards in the immutable coverage manifest.
+              # The runner limits execution to the first two shards separately.
               workers=2
           else:
               workers=12
