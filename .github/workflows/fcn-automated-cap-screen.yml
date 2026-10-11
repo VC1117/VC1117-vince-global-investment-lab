@@ -2,6 +2,11 @@ name: FCN automated market-cap screening (manual research)
 on:
   workflow_dispatch:
     inputs:
+      resume_run_id:
+        description: "Previous workflow run ID (blank = fresh snapshot)"
+        type: string
+        required: false
+        default: ""
       scope:
         description: "pilot=first 2 batches only; full=all provisional candidates, may be rate limited"
         type: choice
@@ -12,6 +17,7 @@ on:
           - full
 permissions:
   contents: read
+  actions: read
 jobs:
   prepare:
     runs-on: ubuntu-latest
@@ -26,10 +32,30 @@ jobs:
           python-version: '3.12'
       - name: Offline runner regression test
         run: python scripts/test_fcn_cap_batch_runner.py
+      - name: Restore frozen snapshot for resume
+        if: inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: fcn-pr17-snapshot
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: research
       - name: Freeze provisional universe
+        if: inputs.resume_run_id == ''
         run: python scripts/fcn_snapshot_batch_pipeline.py snapshot
       - name: Generate full coverage plan
+        if: inputs.resume_run_id == ''
         run: python scripts/fcn_universe_coverage.py plan --size 20
+      - name: Validate resumed manifest
+        if: inputs.resume_run_id != ''
+        run: |
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, 'scripts')
+          from fcn_universe_coverage import audit
+          audit(Path('research/snapshot.json'), Path('research/coverage-plan.json'), Path('research/no-batches'), Path('research/preflight.json'))
+          PY
       - id: configure
         env:
           SCOPE: ${{ inputs.scope }}
@@ -75,6 +101,15 @@ jobs:
         with:
           name: fcn-pr17-snapshot
           path: research
+      - name: Restore prior worker results
+        if: inputs.resume_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fcn-pr17-worker-*
+          run-id: ${{ inputs.resume_run_id }}
+          github-token: ${{ github.token }}
+          path: research/results
+          merge-multiple: true
       - name: Install unofficial research-only interface
         run: python -m pip install 'yfinance>=0.2.65,<2'
       - name: Screen assigned shards with bounded retry
@@ -82,9 +117,9 @@ jobs:
           SCOPE: ${{ inputs.scope }}
         run: |
           if [ "$SCOPE" = "pilot" ]; then
-            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }} --limit-shards 2
+            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }} --limit-shards 2 --retry-failed
           else
-            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }}
+            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }} --retry-failed
           fi
       - uses: actions/upload-artifact@v4
         if: always()
