@@ -52,9 +52,11 @@ def main():
     req = urllib.request.Request(URL, headers={"User-Agent": "VinceInvestmentLab/0.1 validation"})
     with urllib.request.urlopen(req, timeout=25) as response:
         raw = response.read().decode("utf-8-sig")
+    first_line = raw.splitlines()[0][:160] if raw.splitlines() else "(empty)"
+    print("DATA_DIAGNOSTIC http_status=200 bytes={} first_line={!r}".format(len(raw.encode("utf-8")), first_line), flush=True)
     rows = list(csv.DictReader(io.StringIO(raw)))
     if not rows or not {"Date", "Close"}.issubset(rows[0]):
-        raise ValueError("Unexpected CSV response; do not publish")
+        raise ValueError("Unexpected CSV response; do not publish. See DATA_DIAGNOSTIC.")
     result = metrics(rows)
     result.update({"source": "Stooq public daily CSV (evaluation only)", "retrieved_utc": datetime.now(timezone.utc).isoformat(), "status": "VALIDATION_ONLY", "redistribution_approved": False})
     OUT.parent.mkdir(parents=True, exist_ok=True)
