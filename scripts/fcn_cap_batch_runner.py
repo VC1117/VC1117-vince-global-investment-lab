@@ -25,6 +25,7 @@ def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, 
     if not (0 <= worker < workers <= 32) or not (1 <= attempts <= 3):
         raise ValueError("Invalid worker or retry configuration")
     results.mkdir(parents=True, exist_ok=True)
+    telemetry={"skipped_batches":0,"reused_symbols":0,"retried_symbols":0,"new_symbols":0,"written_batches":0}
     for shard in shards[worker::workers]:
         start = shard["start"]
         path = results / ("batch_%05d.json" % start)
@@ -35,6 +36,8 @@ def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, 
                 raise ValueError("Existing batch mismatch: "+str(path))
             if not retry_failed or not any(row["status"] == "failed" for row in old["statuses"]):
                 print("SKIP_EXISTING",start,flush=True)
+                telemetry["skipped_batches"]+=1
+                telemetry["reused_symbols"]+=len(expected)
                 continue
             old_statuses = {row["symbol"]: row for row in old["statuses"]}
         else:
@@ -43,7 +46,9 @@ def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, 
         for symbol in expected:
             if symbol in old_statuses and old_statuses[symbol]["status"] != "failed":
                 statuses.append(old_statuses[symbol])
+                telemetry["reused_symbols"]+=1
                 continue
+            telemetry["retried_symbols" if symbol in old_statuses else "new_symbols"]+=1
             status = None
             for attempt in range(attempts):
                 try:
@@ -62,7 +67,10 @@ def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, 
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
         tmp.replace(path)
+        telemetry["written_batches"]+=1
         print("BATCH_RESULT",start,json.dumps(counts),flush=True)
+
+    print("RESUME_TELEMETRY="+json.dumps({"worker":worker,**telemetry},sort_keys=True),flush=True)
 
 def main():
     p=argparse.ArgumentParser()
