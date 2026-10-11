@@ -103,8 +103,10 @@ def screen(path, start, batch_size, result_dir):
     result_dir.mkdir(parents=True, exist_ok=True)
     (result_dir / ("batch_%05d.json" % start)).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print("BATCH=" + json.dumps({k: v for k, v in result.items() if k != "statuses"}), flush=True)
+    # Missing fundamentals are a recorded data-quality exception, not a crash.
+    # A separate completeness gate still prevents claiming a full clean screen.
     if counts["failed"]:
-        raise RuntimeError("Batch contains failed tickers; results retained for investigation")
+        print("DATA_QUALITY_WARNING: {} unresolved tickers; batch output retained".format(counts["failed"]), flush=True)
 
 def summarize(path, result_dir):
     data = load_snapshot(path)
@@ -129,9 +131,9 @@ def summarize(path, result_dir):
                "complete_universe_screen": len(seen) == data["candidate_count"] and counts["failed"] == 0,
                "security_type_verified": False, "licensing_verified": False, "research_only": True}
     (result_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print("SUMMARY=" + json.dumps(summary, flush=True))
+    print("SUMMARY=" + json.dumps(summary), flush=True)
     if counts["failed"]:
-        raise RuntimeError("Failed tickers require review")
+        print("DATA_QUALITY_WARNING: {} unresolved tickers; complete_universe_screen=false".format(counts["failed"]), flush=True)
 
 def main():
     parser = argparse.ArgumentParser()
