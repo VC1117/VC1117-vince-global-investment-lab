@@ -66,7 +66,7 @@ jobs:
               return;
             }
             if(mode==='auto_resume' && manual) return core.setFailed('Auto mode forbids manual ID');
-            if(mode==='manual_resume' && !/^\\d+$/.test(manual)) return core.setFailed('Manual mode requires numeric resume_run_id');
+            if(mode==='manual_resume' && !/^\d+$/.test(manual)) return core.setFailed('Manual mode requires numeric resume_run_id');
             const valid=async run=>{
               if(run.id===context.runId || run.status!=='completed'||run.conclusion!=='success') return false;
               const artifacts=await github.paginate(github.rest.actions.listWorkflowRunArtifacts,{owner,repo,run_id:run.id,per_page:100});
