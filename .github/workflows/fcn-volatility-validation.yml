@@ -1,0 +1,24 @@
+name: FCN volatility validation (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify formulas and fetch NVDA test data
+        env:
+          FCN_FETCH_LIVE: '1'
+        run: python scripts/validate_fcn_volatility.py
+      - name: Upload validation output
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nvda-volatility-validation
+          path: data/fcn_nvda_validation.json
+          retention-days: 7
