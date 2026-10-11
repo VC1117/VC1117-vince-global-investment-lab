@@ -1,0 +1,30 @@
+name: FCN full-universe coverage plan (manual, research only)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  coverage-plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify coverage audit with synthetic offline fixtures
+        run: python scripts/test_fcn_universe_coverage.py
+      - name: Freeze current provisional universe
+        run: python scripts/fcn_snapshot_batch_pipeline.py snapshot
+      - name: Plan all non-overlapping screening shards
+        run: python scripts/fcn_universe_coverage.py plan --size 20
+      - name: Audit current coverage (zero market-cap batches; intentionally incomplete)
+        run: python scripts/fcn_universe_coverage.py audit
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fcn-research-coverage-plan
+          path: |
+            research/snapshot.json
+            research/coverage-plan.json
+            research/coverage-summary.json
+          retention-days: 7
