@@ -30,8 +30,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Offline research brief regression test
+        run: python scripts/test_fcn_morning_research_brief.py
       - name: Offline runner regression test
         run: python scripts/test_fcn_cap_batch_runner.py
+      - name: Record resume request
+        env:
+          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          if [ -z "$RESUME_RUN_ID" ]; then
+            echo "RESUME_MODE=fresh SCOPE=$SCOPE"
+          else
+            echo "RESUME_MODE=restore SOURCE_RUN=$RESUME_RUN_ID SCOPE=$SCOPE"
+          fi
       - name: Restore frozen snapshot for resume
         if: inputs.resume_run_id != ''
         uses: actions/download-artifact@v4
@@ -151,10 +163,18 @@ jobs:
           merge-multiple: true
       - name: Audit coverage and unresolved symbols
         run: python scripts/fcn_universe_coverage.py audit
+      - name: Generate audited internal research brief
+        if: needs.screen.result == 'success'
+        env:
+          RUN_ID: ${{ github.run_id }}
+          SCOPE: ${{ inputs.scope }}
+        run: python scripts/fcn_morning_research_brief.py --run-id "$RUN_ID" --scope "$SCOPE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: fcn-pr17-coverage-audit
-          path: research/coverage-summary.json
+          path: |
+            research/coverage-summary.json
+            research/FCN_MORNING_RESEARCH_BRIEF.md
           if-no-files-found: warn
           retention-days: 7
