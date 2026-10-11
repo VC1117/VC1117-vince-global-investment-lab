@@ -1,0 +1,25 @@
+name: FCN FULL universe screening (one-click research)
+on:
+  workflow_dispatch:
+permissions:
+  actions: write
+  contents: read
+concurrency:
+  group: fcn-full-dispatch
+  cancel-in-progress: false
+jobs:
+  dispatch-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Launch full scope on main (never pilot)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const {owner,repo}=context.repo;
+            const workflow_id='fcn-automated-cap-screen.yml';
+            const ref='main';
+            const inputs={run_mode:'auto_resume',scope:'full',resume_run_id:''};
+            core.info('FCN_FULL_DISPATCH scope=full run_mode=auto_resume ref=main');
+            await github.rest.actions.createWorkflowDispatch({owner,repo,workflow_id,ref,inputs});
+            core.notice('Full FCN workflow dispatched. Open Actions → FCN automated market-cap screening (manual research) and verify MODE full / WORKERS 12 in prepare logs.');
