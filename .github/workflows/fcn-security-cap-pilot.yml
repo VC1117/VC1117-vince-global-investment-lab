@@ -1,0 +1,18 @@
+name: FCN security triage and cap pilot (manual)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  triage-and-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install research dependency
+        run: python -m pip install 'yfinance>=0.2.65,<2'
+      - name: Triage exchange directory and probe bounded market-cap sample
+        run: python scripts/test_fcn_security_cap_pilot.py
