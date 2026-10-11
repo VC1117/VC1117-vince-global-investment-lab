@@ -1,0 +1,52 @@
+name: FCN official identity evidence (20-symbol research)
+on:
+  workflow_dispatch:
+    inputs:
+      review_run_id:
+        description: "Successful PR26 offline security review Actions run ID"
+        required: true
+        type: string
+        default: "38139524891"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate PR26 source and unexpired artifact
+        uses: actions/github-script@v7
+        env:
+          SOURCE_RUN: ${{ inputs.review_run_id }}
+        with:
+          script: |
+            const raw=process.env.SOURCE_RUN.trim();
+            if(!/^\d+$/.test(raw)) return core.setFailed('Invalid source run ID');
+            const {owner,repo}=context.repo;
+            const run=(await github.rest.actions.getWorkflowRun({owner,repo,run_id:Number(raw)})).data;
+            if(run.path!=='.github/workflows/fcn-security-source-review.yml' || run.status!=='completed' || run.conclusion!=='success')
+              return core.setFailed('Source must be completed successful PR26 workflow');
+            const artifacts=await github.paginate(github.rest.actions.listWorkflowRunArtifacts,{owner,repo,run_id:run.id,per_page:100});
+            if(!artifacts.some(a=>a.name==='fcn-security-source-review' && !a.expired))
+              return core.setFailed('PR26 artifact unavailable or expired');
+            core.info('PR27_SOURCE_REVIEW_RUN='+run.id);
+      - uses: actions/download-artifact@v4
+        with:
+          name: fcn-security-source-review
+          run-id: ${{ inputs.review_run_id }}
+          github-token: ${{ github.token }}
+          path: research/security-source-review
+      - name: Offline tests (no external API)
+        run: python scripts/test_fcn_official_identity.py
+      - name: Retrieve and cross-check official Nasdaq Trader directories
+        run: python scripts/fcn_official_identity.py --pr26-run "${{ inputs.review_run_id }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fcn-official-identity-evidence
+          path: research/official-identity/
+          retention-days: 7
