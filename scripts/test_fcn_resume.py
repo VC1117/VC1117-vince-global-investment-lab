@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline regression: resume retries failures without re-querying successful symbols."""
-import json, tempfile
+import hashlib, json, tempfile
 from pathlib import Path
 from fcn_universe_coverage import plan, audit
 from fcn_cap_batch_runner import run
@@ -21,7 +21,9 @@ class API:
 def main():
     with tempfile.TemporaryDirectory() as td:
         d=Path(td);snap=d/"snapshot.json";manifest=d/"manifest.json";out=d/"results"
-        snap.write_text(json.dumps({"snapshot_id":"offline-1","symbols":["AAA","BBB"]}))
+        symbols=["AAA","BBB"]
+        digest=hashlib.sha256(("\\n".join(symbols)+"\\n").encode()).hexdigest()
+        snap.write_text(json.dumps({"snapshot_id":digest,"symbols":symbols}))
         plan(snap,manifest,2)
         api=API()
         run(snap,manifest,out,0,1,1,0,api)
