@@ -30,7 +30,10 @@ def main():
         for ticker in tickers:
             try:
                 stock = yf.Ticker(ticker)
-                market_cap = stock.fast_info.get("market_cap")
+                # GitHub diagnostics found info.marketCap available while fast_info.market_cap was None.
+                market_cap = stock.info.get("marketCap")
+                if market_cap is None:
+                    market_cap = stock.fast_info.get("market_cap")
                 if market_cap is None or not math.isfinite(float(market_cap)) or market_cap <= 0:
                     raise ValueError("Missing/invalid market capitalization")
                 eligible = float(market_cap) > THRESHOLD_USD
