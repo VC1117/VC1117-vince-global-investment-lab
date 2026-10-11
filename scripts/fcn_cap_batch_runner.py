@@ -16,12 +16,12 @@ def classify(symbol, yf):
         raise ValueError("Market cap missing or invalid")
     return "eligible_over_100bn" if float(cap) > CAP_THRESHOLD else "below_threshold"
 
-def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf):
+def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, limit_shards=None):
     data = load_snapshot(snapshot)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest["snapshot_id"] != data["snapshot_id"]:
         raise ValueError("Snapshot mismatch")
-    shards = manifest["shards"]
+    shards = manifest["shards"][:limit_shards] if limit_shards is not None else manifest["shards"]
     if not (0 <= worker < workers <= 32) or not (1 <= attempts <= 3):
         raise ValueError("Invalid worker or retry configuration")
     results.mkdir(parents=True, exist_ok=True)
@@ -64,10 +64,13 @@ def main():
     p.add_argument("--workers",type=int,required=True)
     p.add_argument("--attempts",type=int,default=2)
     p.add_argument("--pause",type=float,default=0.5)
+    p.add_argument("--limit-shards",type=int,default=None)
     a=p.parse_args()
     if not 0.25 <= a.pause <= 5:
         p.error("pause must be 0.25..5 seconds")
     import yfinance as yf
-    run(a.snapshot,a.manifest,a.results,a.worker,a.workers,a.attempts,a.pause,yf)
+    if a.limit_shards is not None and a.limit_shards < 1:
+        p.error("limit-shards must be positive")
+    run(a.snapshot,a.manifest,a.results,a.worker,a.workers,a.attempts,a.pause,yf,a.limit_shards)
 
 if __name__=="__main__":main()
