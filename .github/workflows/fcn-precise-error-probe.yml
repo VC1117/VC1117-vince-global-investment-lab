@@ -60,8 +60,9 @@ jobs:
         run: python -m pip install 'yfinance>=0.2.65,<2'
       - name: Bounded probe (never stores cap values or raw exceptions)
         run: |
+          SOURCE_RUN=$(python -c 'import json; print(json.load(open("research/diagnostics/FCN_FAILURE_DIAGNOSTICS.json"))["source_run"])')
           python scripts/fcn_error_probe.py \
-            --source-run "38137632572" \
+            --source-run "$SOURCE_RUN" \
             --limit "${{ inputs.probe_limit }}" \
             --pause 1.5
       - uses: actions/upload-artifact@v4
