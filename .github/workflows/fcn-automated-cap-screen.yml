@@ -3,10 +3,19 @@ on:
   workflow_dispatch:
     inputs:
       resume_run_id:
-        description: "Previous workflow run ID (blank = fresh snapshot)"
+        description: "Required only in manual_resume mode; ignored otherwise"
         type: string
         required: false
         default: ""
+      run_mode:
+        description: "auto_resume = find previous successful artifacts; manual_resume = exact run ID; fresh = explicit new snapshot"
+        type: choice
+        required: true
+        default: auto_resume
+        options:
+          - auto_resume
+          - manual_resume
+          - fresh
       scope:
         description: "pilot=first 2 batches only; full=all provisional candidates, may be rate limited"
         type: choice
@@ -25,6 +34,8 @@ jobs:
     outputs:
       matrix: ${{ steps.configure.outputs.matrix }}
       workers: ${{ steps.configure.outputs.workers }}
+      source_run: ${{ steps.resolve.outputs.source_run }}
+      mode: ${{ steps.resolve.outputs.mode }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,34 +45,68 @@ jobs:
         run: python scripts/test_fcn_morning_research_brief.py
       - name: Offline runner regression test
         run: python scripts/test_fcn_cap_batch_runner.py
-      - name: Record resume request
+      - name: Resolve prior successful artifacts (fail closed)
+        id: resolve
+        uses: actions/github-script@v7
         env:
-          RESUME_RUN_ID: ${{ inputs.resume_run_id }}
+          RUN_MODE: ${{ inputs.run_mode }}
+          MANUAL_ID: ${{ inputs.resume_run_id }}
           SCOPE: ${{ inputs.scope }}
-        run: |
-          if [ -z "$RESUME_RUN_ID" ]; then
-            echo "RESUME_MODE=fresh SCOPE=$SCOPE"
-          else
-            echo "RESUME_MODE=restore SOURCE_RUN=$RESUME_RUN_ID SCOPE=$SCOPE"
-          fi
+        with:
+          script: |
+            const mode=process.env.RUN_MODE;
+            const manual=process.env.MANUAL_ID.trim();
+            const scope=process.env.SCOPE;
+            const {owner,repo}=context.repo;
+            if(!['auto_resume','manual_resume','fresh'].includes(mode)) core.setFailed('Invalid run mode');
+            if(mode==='fresh'){
+              if(manual) return core.setFailed('Fresh mode forbids resume_run_id');
+              core.setOutput('mode','fresh');core.setOutput('source_run','');
+              core.info('RESUME_MODE=fresh (explicit)');
+              return;
+            }
+            if(mode==='auto_resume' && manual) return core.setFailed('Auto mode forbids manual ID');
+            if(mode==='manual_resume' && !/^\d+$/.test(manual)) return core.setFailed('Manual mode requires numeric resume_run_id');
+            const valid=async run=>{
+              if(run.id===context.runId || run.status!=='completed'||run.conclusion!=='success') return false;
+              const artifacts=await github.paginate(github.rest.actions.listWorkflowRunArtifacts,{owner,repo,run_id:run.id,per_page:100});
+              const names=new Set(artifacts.filter(a=>!a.expired).map(a=>a.name));
+              return names.has('fcn-pr17-snapshot') && names.has('fcn-pr17-worker-0') && names.has('fcn-pr17-worker-1');
+            };
+            let chosen;
+            if(mode==='manual_resume'){
+              const response=await github.rest.actions.getWorkflowRun({owner,repo,run_id:Number(manual)});
+              if(response.data.path!=='.github/workflows/fcn-automated-cap-screen.yml' || !(await valid(response.data))) return core.setFailed('Source run invalid, failed or artifacts expired');
+              chosen=response.data;
+            } else {
+              const runs=await github.paginate(github.rest.actions.listWorkflowRuns,{owner,repo,workflow_id:'fcn-automated-cap-screen.yml',status:'completed',per_page:100});
+              for(const run of runs){
+                if(run.conclusion==='success' && await valid(run)){chosen=run;break;}
+              }
+              if(!chosen) return core.setFailed('No resumable successful run with unexpired artifacts. Choose fresh explicitly.');
+            }
+            // Pilot/full transitions require explicit review before broad execution.
+            core.setOutput('mode','restore');
+            core.setOutput('source_run',String(chosen.id));
+            core.info('RESUME_MODE=restore SOURCE_RUN='+chosen.id+' SCOPE='+scope);
       - name: Restore frozen snapshot for resume
-        if: inputs.resume_run_id != ''
+        if: steps.resolve.outputs.mode == 'restore'
         uses: actions/download-artifact@v4
         with:
           name: fcn-pr17-snapshot
-          run-id: ${{ inputs.resume_run_id }}
+          run-id: ${{ steps.resolve.outputs.source_run }}
           github-token: ${{ github.token }}
           path: research
       - name: Offline resume regression test
         run: python scripts/test_fcn_resume.py
       - name: Freeze provisional universe
-        if: inputs.resume_run_id == ''
+        if: steps.resolve.outputs.mode == 'fresh'
         run: python scripts/fcn_snapshot_batch_pipeline.py snapshot
       - name: Generate full coverage plan
-        if: inputs.resume_run_id == ''
+        if: steps.resolve.outputs.mode == 'fresh'
         run: python scripts/fcn_universe_coverage.py plan --size 20
       - name: Validate resumed manifest
-        if: inputs.resume_run_id != ''
+        if: steps.resolve.outputs.mode == 'restore'
         run: |
           python - <<'PY'
           import sys
@@ -116,11 +161,11 @@ jobs:
           name: fcn-pr17-snapshot
           path: research
       - name: Restore prior worker results
-        if: inputs.resume_run_id != ''
+        if: needs.prepare.outputs.mode == 'restore'
         uses: actions/download-artifact@v4
         with:
           pattern: fcn-pr17-worker-*
-          run-id: ${{ inputs.resume_run_id }}
+          run-id: ${{ needs.prepare.outputs.source_run }}
           github-token: ${{ github.token }}
           path: research/results
           merge-multiple: true
