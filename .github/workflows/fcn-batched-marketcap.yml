@@ -1,0 +1,37 @@
+name: FCN batched market-cap screen (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      start_index:
+        description: 'Starting candidate offset (first batch: 0; use next_start_index for next batch)'
+        required: true
+        default: '0'
+        type: string
+      batch_size:
+        description: 'Tickers per run, 1 to 25'
+        required: true
+        default: '20'
+        type: string
+permissions:
+  contents: read
+jobs:
+  cap-screen:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install unofficial research-only data interface
+        run: python -m pip install 'yfinance>=0.2.65,<2'
+      - name: Screen bounded batch and write checkpoint
+        run: python scripts/test_fcn_batched_marketcap.py --start-index "${{ inputs.start_index }}" --batch-size "${{ inputs.batch_size }}"
+      - name: Upload research checkpoint (symbols, statuses, failures only; no market cap values)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fcn-research-checkpoint-${{ github.run_id }}
+          path: research_checkpoint/checkpoint.json
+          if-no-files-found: warn
+          retention-days: 7
