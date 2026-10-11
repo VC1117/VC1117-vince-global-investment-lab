@@ -50,7 +50,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"],"a") as f:
               f.write("matrix="+json.dumps(matrix,separators=(",",":"))+"\n")
               f.write("workers="+str(workers)+"\n")
-          print("MODE",os.environ["SCOPE"],"SHARDS",len(data["shards"]),"WORKERS",workers)
+          print("MODE",os.environ["SCOPE"],"PLANNED_SHARDS",len(data["shards"]),"WORKERS",workers)
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -79,7 +79,14 @@ jobs:
       - name: Install unofficial research-only interface
         run: python -m pip install 'yfinance>=0.2.65,<2'
       - name: Screen assigned shards with bounded retry
-        run: python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }}
+        env:
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          if [ "$SCOPE" = "pilot" ]; then
+            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }} --limit-shards 2
+          else
+            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }}
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
