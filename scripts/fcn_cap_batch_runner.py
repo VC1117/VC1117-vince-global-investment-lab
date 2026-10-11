@@ -16,7 +16,7 @@ def classify(symbol, yf):
         raise ValueError("Market cap missing or invalid")
     return "eligible_over_100bn" if float(cap) > CAP_THRESHOLD else "below_threshold"
 
-def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, limit_shards=None):
+def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, limit_shards=None, retry_failed=False):
     data = load_snapshot(snapshot)
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest["snapshot_id"] != data["snapshot_id"]:
@@ -33,10 +33,17 @@ def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, 
             old = json.loads(path.read_text(encoding="utf-8"))
             if old.get("snapshot_id") != data["snapshot_id"] or [x.get("symbol") for x in old.get("statuses",[])] != expected:
                 raise ValueError("Existing batch mismatch: "+str(path))
-            print("SKIP_EXISTING",start,flush=True)
-            continue
+            if not retry_failed or not any(row["status"] == "failed" for row in old["statuses"]):
+                print("SKIP_EXISTING",start,flush=True)
+                continue
+            old_statuses = {row["symbol"]: row for row in old["statuses"]}
+        else:
+            old_statuses = {}
         statuses = []
         for symbol in expected:
+            if symbol in old_statuses and old_statuses[symbol]["status"] != "failed":
+                statuses.append(old_statuses[symbol])
+                continue
             status = None
             for attempt in range(attempts):
                 try:
@@ -52,7 +59,9 @@ def run(snapshot, manifest_path, results, worker, workers, attempts, pause, yf, 
         result={"snapshot_id":data["snapshot_id"],"start_index":start,
                 "next_start_index":start+len(expected),"processed":len(expected),
                 "counts":counts,"statuses":statuses,"research_only":True}
-        path.write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+        tmp.replace(path)
         print("BATCH_RESULT",start,json.dumps(counts),flush=True)
 
 def main():
@@ -65,12 +74,13 @@ def main():
     p.add_argument("--attempts",type=int,default=2)
     p.add_argument("--pause",type=float,default=0.5)
     p.add_argument("--limit-shards",type=int,default=None)
+    p.add_argument("--retry-failed",action="store_true")
     a=p.parse_args()
     if not 0.25 <= a.pause <= 5:
         p.error("pause must be 0.25..5 seconds")
     import yfinance as yf
     if a.limit_shards is not None and a.limit_shards < 1:
         p.error("limit-shards must be positive")
-    run(a.snapshot,a.manifest,a.results,a.worker,a.workers,a.attempts,a.pause,yf,a.limit_shards)
+    run(a.snapshot,a.manifest,a.results,a.worker,a.workers,a.attempts,a.pause,yf,a.limit_shards,a.retry_failed)
 
 if __name__=="__main__":main()
