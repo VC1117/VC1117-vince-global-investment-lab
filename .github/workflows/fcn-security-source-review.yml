@@ -1,0 +1,52 @@
+name: FCN security type and alternate source review (offline)
+on:
+  workflow_dispatch:
+    inputs:
+      probe_run_id:
+        description: "Completed successful PR25 controlled probe Actions run ID"
+        required: true
+        type: string
+        default: "38139109951"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify PR25 source run and artifact
+        uses: actions/github-script@v7
+        env:
+          SOURCE_RUN: ${{ inputs.probe_run_id }}
+        with:
+          script: |
+            const raw=process.env.SOURCE_RUN.trim();
+            if(!/^\d+$/.test(raw)) return core.setFailed('Invalid run ID');
+            const {owner,repo}=context.repo;
+            const run=(await github.rest.actions.getWorkflowRun({owner,repo,run_id:Number(raw)})).data;
+            if(run.path!=='.github/workflows/fcn-precise-error-probe.yml' || run.status!=='completed' || run.conclusion!=='success')
+              return core.setFailed('Source must be a successful completed PR25 probe run');
+            const artifacts=await github.paginate(github.rest.actions.listWorkflowRunArtifacts,{owner,repo,run_id:run.id,per_page:100});
+            if(!artifacts.some(a=>a.name==='fcn-precise-error-probe' && !a.expired))
+              return core.setFailed('Probe artifact missing or expired');
+            core.info('SECURITY_REVIEW_PROBE_RUN='+run.id);
+      - uses: actions/download-artifact@v4
+        with:
+          name: fcn-precise-error-probe
+          run-id: ${{ inputs.probe_run_id }}
+          github-token: ${{ github.token }}
+          path: research/error-probe
+      - name: Offline self-test
+        run: python scripts/test_fcn_security_source_review.py
+      - name: Generate evidence collection queue and source assessment
+        run: python scripts/fcn_security_source_review.py --probe-run "${{ inputs.probe_run_id }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fcn-security-source-review
+          path: research/security-source-review/
+          retention-days: 7
