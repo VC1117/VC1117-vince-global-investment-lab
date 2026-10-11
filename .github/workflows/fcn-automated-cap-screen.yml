@@ -1,0 +1,124 @@
+name: FCN automated market-cap screening (manual research)
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "pilot=first 2 batches only; full=all provisional candidates, may be rate limited"
+        type: choice
+        required: true
+        default: pilot
+        options:
+          - pilot
+          - full
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      matrix: ${{ steps.configure.outputs.matrix }}
+      workers: ${{ steps.configure.outputs.workers }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Offline runner regression test
+        run: python scripts/test_fcn_cap_batch_runner.py
+      - name: Freeze provisional universe
+        run: python scripts/fcn_snapshot_batch_pipeline.py snapshot
+      - name: Generate full coverage plan
+        run: python scripts/fcn_universe_coverage.py plan --size 20
+      - id: configure
+        env:
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          manifest=Path("research/coverage-plan.json")
+          data=json.loads(manifest.read_text())
+          if os.environ["SCOPE"]=="pilot":
+              data["shards"]=data["shards"][:2]
+              data["pilot_only"]=True
+              manifest.write_text(json.dumps(data,ensure_ascii=False,indent=2)+"\n")
+              workers=2
+          else:
+              workers=12
+          matrix={"include":[{"worker":i} for i in range(workers)]}
+          with open(os.environ["GITHUB_OUTPUT"],"a") as f:
+              f.write("matrix="+json.dumps(matrix,separators=(",",":"))+"\n")
+              f.write("workers="+str(workers)+"\n")
+          print("MODE",os.environ["SCOPE"],"PLANNED_SHARDS",len(data["shards"]),"WORKERS",workers)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fcn-pr17-snapshot
+          path: |
+            research/snapshot.json
+            research/coverage-plan.json
+          retention-days: 7
+  screen:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fcn-pr17-snapshot
+          path: research
+      - name: Install unofficial research-only interface
+        run: python -m pip install 'yfinance>=0.2.65,<2'
+      - name: Screen assigned shards with bounded retry
+        env:
+          SCOPE: ${{ inputs.scope }}
+        run: |
+          if [ "$SCOPE" = "pilot" ]; then
+            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }} --limit-shards 2
+          else
+            python scripts/fcn_cap_batch_runner.py --worker ${{ matrix.worker }} --workers ${{ needs.prepare.outputs.workers }}
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fcn-pr17-worker-${{ matrix.worker }}
+          path: research/results/batch_*.json
+          if-no-files-found: warn
+          retention-days: 7
+  audit:
+    needs: [prepare,screen]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: fcn-pr17-snapshot
+          path: research
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fcn-pr17-worker-*
+          path: research/results
+          merge-multiple: true
+      - name: Audit coverage and unresolved symbols
+        run: python scripts/fcn_universe_coverage.py audit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fcn-pr17-coverage-audit
+          path: research/coverage-summary.json
+          if-no-files-found: warn
+          retention-days: 7
